@@ -245,3 +245,39 @@ export async function updateProfileStatusInSupabase(id: string, status: string):
     return false;
   }
 }
+
+export async function deleteProfileFromSupabase(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.warn('Error deleting profile from Supabase:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Network error deleting profile:', err);
+    return false;
+  }
+}
+
+export async function updateDiscountInSupabase(id: string, updates: Partial<Discount>): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('discounts')
+      .update(updates)
+      .eq('id', id);
+
+    if (error) {
+      console.warn('Error updating discount in Supabase:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Network error updating discount:', err);
+    return false;
+  }
+}

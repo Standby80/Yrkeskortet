@@ -31,4 +31,4 @@ export interface Profile {
 }
 
 export type TabType = 'discounts' | 'local' | 'card' | 'profile';
-export type AdminTabType = 'discounts' | 'members';
+export type AdminTabType = 'users' | 'partners' | 'campaigns' | 'analytics' | 'finance';
