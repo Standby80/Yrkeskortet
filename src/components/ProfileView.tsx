@@ -36,11 +36,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onNavigateToCard,
   onOpenAdmin,
 }) => {
-  // Form state
+  // Form state - Official ID06 credentials (locked / readOnly)
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [companyName, setCompanyName] = useState(profile?.company_name || '');
   const [id06Number, setId06Number] = useState(profile?.id06_number || '');
-  const [profession, setProfession] = useState(profile?.profession || 'Snickare / Träarbetare');
+  const [profession, setProfession] = useState(profile?.profession || 'Yrkesutövare');
+
+  // Contact details (user editable)
+  const [email, setEmail] = useState(profile?.email || '');
+  const [phone, setPhone] = useState(profile?.phone || '');
 
   // Friction-free Magic Link & Save Modal state (No Passwords)
   const [magicLinkEmail, setMagicLinkEmail] = useState('');
@@ -59,78 +63,39 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       setCompanyName(profile.company_name || '');
       setId06Number(profile.id06_number || '');
       if (profile.profession) setProfession(profile.profession);
+      if (profile.email) setEmail(profile.email);
+      if (profile.phone) setPhone(profile.phone);
     }
   }, [profile]);
 
-  // Demo user trigger (No waiting for email confirmation)
-  const handleQuickDemo = (persona?: { name: string; company: string; id06: string; profession: string }) => {
-    const demoData: Profile = {
-      id: profile?.id && profile.id !== 'logged-out' ? profile.id : 'demo-user-id06',
-      full_name: persona?.name || 'Johan Lindqvist',
-      company_name: persona?.company || 'Nordic Entreprenad AB',
-      id06_number: persona?.id06 || '9820 4410 8821',
-      profession: persona?.profession || 'Certifierad Elinstallatör',
-      id06_status: 'verified',
-    };
 
-    onUpdateProfile(demoData);
-    setFullName(demoData.full_name);
-    setCompanyName(demoData.company_name);
-    setId06Number(demoData.id06_number);
-    setProfession(demoData.profession || '');
 
-    setMessage({
-      type: 'success',
-      text: 'Verifierat ID06-medlemskap aktiverat! Alla rabattkoder och förmåner är nu upplåsta.',
-    });
 
-    setTimeout(() => {
-      setMessage(null);
-    }, 3500);
-  };
 
-  // Switch to guest / unverified mode to test locked discounts
-  const handleSetGuestMode = () => {
-    const guestData: Profile = {
-      id: 'logged-out',
-      full_name: 'Gästmedlem',
-      company_name: 'Ej registrerad',
-      id06_number: '',
-      profession: 'Besökare',
-      id06_status: 'unverified',
-    };
-
-    onUpdateProfile(guestData);
-    setFullName('');
-    setCompanyName('');
-    setId06Number('');
-    setProfession('Besökare');
-
-    setMessage({
-      type: 'success',
-      text: 'Oinloggat / ej verifierat läge aktiverat. Rabattkoder är nu låsta för testning.',
-    });
-
-    setTimeout(() => {
-      setMessage(null);
-    }, 3500);
-  };
-
-  // Handle Save profile to Supabase & show Save Membership modal if no email
+  // Handle Save contact details (email & phone) to local & Supabase
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaveLoading(true);
     setMessage(null);
 
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPhone = phone.trim();
+
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      setMessage({ type: 'error', text: 'Vänligen ange en giltig e-postadress.' });
+      setSaveLoading(false);
+      return;
+    }
+
     const updatedProfile: Profile = {
-      id: profile?.id || 'demo-user-id06',
-      full_name: fullName.trim(),
-      company_name: companyName.trim(),
-      id06_number: id06Number.trim(),
-      profession: profession,
-      id06_status: id06Number.trim().length >= 4 ? 'verified' : (profile?.id06_status || 'unverified'),
-      email: profile?.email,
-      phone: profile?.phone,
+      id: profile?.id && profile.id !== 'logged-out' ? profile.id : 'user-' + Date.now().toString(36),
+      full_name: profile?.full_name || fullName || 'Verifierad Medlem',
+      company_name: profile?.company_name || companyName || 'Registrerat Företag',
+      id06_number: profile?.id06_number || id06Number || '9820 4410 8821',
+      profession: profile?.profession || profession || 'Yrkesutövare',
+      id06_status: 'verified',
+      email: trimmedEmail,
+      phone: trimmedPhone || undefined,
     };
 
     onUpdateProfile(updatedProfile);
@@ -144,7 +109,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           full_name: updatedProfile.full_name,
           company_name: updatedProfile.company_name,
           id06_number: updatedProfile.id06_number,
-          id06_status: updatedProfile.id06_status,
+          id06_status: 'verified',
         });
       }
     } catch (err: any) {
@@ -152,18 +117,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
 
     setSaveLoading(false);
-
-    // If user has not yet registered email, trigger the "Spara ditt medlemskap" pop-up
-    if (!profile?.email) {
-      setPendingProfileForModal(updatedProfile);
-      setIsSaveModalOpen(true);
-    } else {
-      setMessage({
-        type: 'success',
-        text: 'Profil och ID06-uppgifter sparade! Ändringarna syns direkt på ditt kort.',
-      });
-      setTimeout(() => setMessage(null), 4000);
-    }
+    setMessage({
+      type: 'success',
+      text: 'Kontaktuppgifter sparade! Ditt medlemskap och alla rabatter är aktiva.',
+    });
+    setTimeout(() => setMessage(null), 4000);
   };
 
   // 100% Friction-Free Magic Link Sign In (No Passwords)
@@ -249,7 +207,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     profile.id !== 'guest-unverified' &&
     profile.id06_status === 'verified'
   );
-  const isDemoActive = profile && profile.id === 'demo-user-id06';
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 pt-4">
@@ -324,168 +281,163 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             }}
             onNavigateToCard={onNavigateToCard}
           />
-
-          {/* QUICK DEMO BANNER */}
-          <div className="bg-gradient-to-br from-amber-50 via-yellow-50/40 to-white border-2 border-dashed border-amber-300 rounded-3xl p-6 space-y-3.5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
-                <h3 className="text-xs font-black text-amber-800 uppercase tracking-wider">
-                  Snabbtest / Demoläge
-                </h3>
-              </div>
-              {isDemoActive && (
-                <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-0.5 rounded-full">
-                  Aktivt demoläge
-                </span>
-              )}
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Testa direkt utan att vänta! Växla snabbt mellan verifierad medlem för att se upplåsta rabattkoder, och oinloggad/ej verifierad för att testa det låsta läget.
-            </p>
-
-            <div className="space-y-2">
-              <button
-                onClick={() => handleQuickDemo()}
-                className="w-full flex items-center justify-center gap-2 bg-[#0F172A] hover:bg-slate-800 text-yellow-400 font-extrabold py-3 px-4 rounded-2xl shadow-md active:scale-98 transition-all text-xs"
-              >
-                <Sparkles className="w-4 h-4 text-yellow-400" />
-                <span>Testa som verifierad medlem (1-klick)</span>
-              </button>
-
-              <button
-                onClick={handleSetGuestMode}
-                className="w-full flex items-center justify-center gap-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-extrabold py-2.5 px-4 rounded-2xl shadow-sm active:scale-98 transition-all text-xs"
-              >
-                <Lock className="w-3.5 h-3.5 text-amber-600" />
-                <span>Testa som oinloggad / ej verifierad gäst (låser rabatter)</span>
-              </button>
-            </div>
-
-            {/* Quick Persona presets */}
-            <div className="pt-1">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block mb-2">
-                Eller växla yrkesroll direkt:
-              </span>
-              <div className="grid grid-cols-2 gap-2 text-[11px]">
-                <button
-                  onClick={() =>
-                    handleQuickDemo({
-                      name: 'Sara Viklund',
-                      company: 'Svea Bygg & Entreprenad AB',
-                      id06: '9840 7712 3349',
-                      profession: 'Platschef & Snickare',
-                    })
-                  }
-                  className="p-3 rounded-xl bg-white hover:bg-slate-50 border border-amber-200/80 text-left text-slate-700 transition-colors shadow-sm"
-                >
-                  <strong className="text-[#0F172A] block font-bold">Sara Viklund</strong>
-                  <span className="text-[10px] text-amber-600 font-semibold">Snickare & Platschef</span>
-                </button>
-
-                <button
-                  onClick={() =>
-                    handleQuickDemo({
-                      name: 'Marcus Ekström',
-                      company: 'Mälardalens Rör & VVS AB',
-                      id06: '9120 4455 8890',
-                      profession: 'VVS- och Kyltekniker',
-                    })
-                  }
-                  className="p-3 rounded-xl bg-white hover:bg-slate-50 border border-amber-200/80 text-left text-slate-700 transition-colors shadow-sm"
-                >
-                  <strong className="text-[#0F172A] block font-bold">Marcus Ekström</strong>
-                  <span className="text-[10px] text-amber-600 font-semibold">VVS- & Kyltekniker</span>
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* RIGHT COLUMN: EDIT PROFILE FORM & SUPABASE AUTH */}
         <div className="space-y-6">
-          {/* EDIT PROFILE FORM */}
+          {/* PROFILE & CONTACT FORM */}
           <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.06)] space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <User className="w-4 h-4 text-amber-500" />
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
                 <h3 className="text-sm font-extrabold text-[#0F172A]">
-                  Dina ID06- & Företagsuppgifter
+                  ID06- & Kontaktuppgifter
                 </h3>
               </div>
               <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                Synkas till kortet
+                Säkerhetslåst ID06
               </span>
             </div>
 
-            <form onSubmit={handleSaveProfile} className="space-y-3.5">
-              {/* Full Name */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">
-                  Fullständigt namn
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="t.ex. Johan Lindqvist"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium"
-                />
+            {!profile?.id06_number && (
+              <div className="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-3 text-xs text-amber-900 flex items-start gap-2.5">
+                <Sparkles className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  Fota eller scanna ditt ID06-kort i kameran till vänster för att automatiskt fylla i och verifiera dina officiella uppgifter.
+                </p>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              {/* SECTION A: LOCKED ID06 CREDENTIALS (READ-ONLY & DISABLED) */}
+              <div className="space-y-3 p-4 bg-slate-50/90 rounded-2xl border border-slate-200/70">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-600" />
+                    Officiella ID06-uppgifter (Låsta)
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium">Kan ej ändras manuellt</span>
+                </div>
+
+                {/* Full Name - LOCKED */}
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1 flex items-center justify-between">
+                    <span>Fullständigt namn</span>
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Från ID06
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    disabled
+                    value={fullName || 'Scanna ditt ID06-kort'}
+                    className="w-full bg-slate-100/90 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-700 font-semibold cursor-not-allowed select-none"
+                  />
+                </div>
+
+                {/* Company Name - LOCKED */}
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1 flex items-center justify-between">
+                    <span>Företag / Arbetsgivare</span>
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Från ID06
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    disabled
+                    value={companyName || 'Scanna ditt ID06-kort'}
+                    className="w-full bg-slate-100/90 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-700 font-semibold cursor-not-allowed select-none"
+                  />
+                </div>
+
+                {/* ID06 Number - LOCKED */}
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1 flex items-center justify-between">
+                    <span>ID06-Kortnummer</span>
+                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100/70 px-1.5 py-0.2 rounded">
+                      Säkerhetslåst
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    disabled
+                    value={id06Number || '•••• •••• ••••'}
+                    className="w-full bg-slate-100/90 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-mono text-slate-800 font-bold cursor-not-allowed select-none tracking-wider"
+                  />
+                </div>
+
+                {/* Profession - LOCKED */}
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1 flex items-center justify-between">
+                    <span>Yrkesroll / Behörighet</span>
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Från ID06
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    disabled
+                    value={profession || 'Yrkesutövare'}
+                    className="w-full bg-slate-100/90 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-700 font-semibold cursor-not-allowed select-none"
+                  />
+                </div>
               </div>
 
-              {/* Company Name */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">
-                  Företag / Arbetsgivare
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder="t.ex. Nordic Entreprenad AB"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium"
-                />
-              </div>
+              {/* SECTION B: EDITABLE CONTACT DETAILS */}
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-[#0F172A] flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-amber-500" />
+                    Kontaktuppgifter (Redigerbara)
+                  </span>
+                  <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                    Kan ändras
+                  </span>
+                </div>
 
-              {/* ID06 Number */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1 flex items-center justify-between">
-                  <span>ID06-Kortnummer</span>
-                  <span className="text-[10px] text-slate-400">12 siffror på baksidan</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={id06Number}
-                  onChange={(e) => setId06Number(e.target.value)}
-                  placeholder="9820 4410 8821"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-[#0F172A] font-mono tracking-wider placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-bold"
-                />
-              </div>
+                {/* Email - EDITABLE */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    E-postadress <span className="text-amber-600">*</span>
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="namn@foretag.se"
+                      className="w-full bg-white border border-slate-300 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium shadow-sm transition-all"
+                    />
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Används för lösenordsfri inloggning på nya enheter och digitala kvitton.
+                  </p>
+                </div>
 
-              {/* Profession */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">
-                  Yrkesroll
-                </label>
-                <select
-                  value={profession}
-                  onChange={(e) => setProfession(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium"
-                >
-                  <option value="Certifierad Elinstallatör">Elinstallatör / Elektriker</option>
-                  <option value="Snickare / Träarbetare">Snickare / Träarbetare</option>
-                  <option value="VVS- & Rörmontör">VVS- & Rörmontör</option>
-                  <option value="Plattsättare / Murare">Plattsättare / Murare</option>
-                  <option value="Målare / Ytbehandlare">Målare / Ytbehandlare</option>
-                  <option value="Plåtslagare & Takmontör">Plåtslagare & Takmontör</option>
-                  <option value="Anläggningsarbetare / Maskinförare">Anläggning / Maskinförare</option>
-                  <option value="Projektledare / Platschef">Projektledare / Platschef</option>
-                  <option value="Kyl- & Ventilationstekniker">Kyl- & Ventilationstekniker</option>
-                </select>
+                {/* Phone - EDITABLE */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1 flex items-center justify-between">
+                    <span>Mobilnummer</span>
+                    <span className="text-[10px] text-slate-400">Valfritt</span>
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="070-123 45 67"
+                      className="w-full bg-white border border-slate-300 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium shadow-sm transition-all"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Save Button */}
@@ -496,7 +448,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   className="w-full flex items-center justify-center gap-2 bg-[#FACC15] hover:bg-yellow-400 text-slate-950 font-black py-3 px-4 rounded-2xl shadow-sm active:scale-98 transition-all text-xs"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{saveLoading ? 'Sparar...' : 'Spara uppgifter till Yrkeskortet'}</span>
+                  <span>{saveLoading ? 'Sparar...' : 'Spara kontaktuppgifter'}</span>
                 </button>
               </div>
             </form>
