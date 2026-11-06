@@ -26,6 +26,8 @@ export interface Profile {
   created_at?: string;
   profession?: string;
   id06_status?: 'pending' | 'verified' | 'rejected' | string;
+  email?: string;
+  phone?: string;
 }
 
 export type TabType = 'discounts' | 'local' | 'card' | 'profile';

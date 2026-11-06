@@ -22,12 +22,14 @@ interface ID06AiScannerProps {
   profile: Profile | null;
   onVerificationComplete: (updatedProfile: Profile) => void;
   onNavigateToCard: () => void;
+  onOpenSaveMembership?: (profile: Profile) => void;
 }
 
 export const ID06AiScanner: React.FC<ID06AiScannerProps> = ({
   profile,
   onVerificationComplete,
   onNavigateToCard,
+  onOpenSaveMembership,
 }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzingStep, setAnalyzingStep] = useState<string>('');
@@ -90,6 +92,13 @@ export const ID06AiScanner: React.FC<ID06AiScannerProps> = ({
 
         // Update local app state
         onVerificationComplete(updatedProfile);
+
+        // Prompt to save membership friction-free if email is not yet registered
+        if (onOpenSaveMembership && !profile?.email) {
+          setTimeout(() => {
+            onOpenSaveMembership(updatedProfile);
+          }, 800);
+        }
       } else {
         setSuccess(false);
         setErrorMsg(res.reason || 'Kortet kunde inte godkännas som ett giltigt ID06-kort.');
@@ -332,13 +341,36 @@ export const ID06AiScanner: React.FC<ID06AiScannerProps> = ({
             )}
           </div>
 
-          <button
-            onClick={onNavigateToCard}
-            className="w-full flex items-center justify-center gap-2 bg-[#0F172A] hover:bg-slate-800 text-yellow-400 font-black py-2.5 px-4 rounded-xl shadow-md text-xs transition-colors"
-          >
-            <span>Öppna mitt uppdaterade Yrkeskort</span>
-            <ArrowRight className="w-4 h-4 text-yellow-400" />
-          </button>
+          <div className="space-y-2 pt-1">
+            {!profile?.email && onOpenSaveMembership && (
+              <button
+                type="button"
+                onClick={() => {
+                  const current: Profile = {
+                    id: profile?.id || 'demo-user-id06',
+                    full_name: result.full_name || profile?.full_name || 'Verifierad Medlem',
+                    company_name: result.company_name || profile?.company_name || 'Registrerat Företag',
+                    id06_number: result.id06_number || profile?.id06_number || '9820 4410 8821',
+                    profession: profile?.profession || 'Certifierad Yrkesutövare',
+                    id06_status: 'verified',
+                  };
+                  onOpenSaveMembership(current);
+                }}
+                className="w-full flex items-center justify-center gap-2 bg-[#FACC15] hover:bg-yellow-400 text-slate-950 font-black py-2.5 px-4 rounded-xl shadow-md text-xs transition-colors"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Spara medlemskap så du slipper logga in</span>
+              </button>
+            )}
+
+            <button
+              onClick={onNavigateToCard}
+              className="w-full flex items-center justify-center gap-2 bg-[#0F172A] hover:bg-slate-800 text-yellow-400 font-black py-2.5 px-4 rounded-xl shadow-md text-xs transition-colors"
+            >
+              <span>Öppna mitt uppdaterade Yrkeskort</span>
+              <ArrowRight className="w-4 h-4 text-yellow-400" />
+            </button>
+          </div>
         </div>
       )}
 
