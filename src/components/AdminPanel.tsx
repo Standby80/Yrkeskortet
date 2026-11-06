@@ -12,7 +12,6 @@ import {
   ShieldCheck, 
   Building2, 
   CreditCard, 
-  Sparkles,
   RefreshCw,
   LogOut,
   MapPin,
@@ -33,36 +32,6 @@ interface AdminPanelProps {
   discounts: Discount[];
   onDiscountsUpdated: (updatedList: Discount[]) => void;
 }
-
-const SAMPLE_APPLICATIONS: Profile[] = [
-  {
-    id: 'test-app-1',
-    full_name: 'Magnus Berglund',
-    company_name: 'Berglunds Bygg & Snickeri AB',
-    id06_number: '9820 4491 3320',
-    profession: 'Snickare',
-    id06_status: 'pending',
-    created_at: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-  },
-  {
-    id: 'test-app-2',
-    full_name: 'Elinor Ström',
-    company_name: 'Mälardalen El & Automation AB',
-    id06_number: '9840 8821 1104',
-    profession: 'Elinstallatör',
-    id06_status: 'pending',
-    created_at: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-  },
-  {
-    id: 'test-app-3',
-    full_name: 'Kalle Lind',
-    company_name: 'Lind Rör & Värme KB',
-    id06_number: '9120 7766 5544',
-    profession: 'VVS-montör',
-    id06_status: 'verified',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-  }
-];
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   isOpen,
@@ -85,40 +54,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [isCreatingDiscount, setIsCreatingDiscount] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Tab 2: Members Profiles State
-  const [profiles, setProfiles] = useState<Profile[]>(() => {
-    const saved = localStorage.getItem('yrkeskortet_admin_members');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return SAMPLE_APPLICATIONS;
-      }
-    }
-    return SAMPLE_APPLICATIONS;
-  });
+  // Tab 2: Members Profiles State (ONLY real data from Supabase)
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [memberFilter, setMemberFilter] = useState<'all' | 'pending' | 'verified' | 'rejected'>('all');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Load profiles from Supabase and merge
+  // Load profiles strictly from Supabase profiles table
   const loadProfiles = async () => {
     setLoadingProfiles(true);
     try {
       const supaProfiles = await getProfilesFromSupabase();
-      if (supaProfiles && supaProfiles.length > 0) {
-        setProfiles((prev) => {
-          const merged = [...supaProfiles];
-          for (const p of prev) {
-            if (!merged.some(m => m.id === p.id)) {
-              merged.push(p);
-            }
-          }
-          localStorage.setItem('yrkeskortet_admin_members', JSON.stringify(merged));
-          return merged;
-        });
-      }
+      setProfiles(supaProfiles || []);
     } catch (err) {
       console.warn('Profiles load error:', err);
+      setProfiles([]);
     } finally {
       setLoadingProfiles(false);
     }
@@ -126,6 +76,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      // Clear out any old cached mock profiles from localStorage
+      localStorage.removeItem('yrkeskortet_admin_members');
       loadProfiles();
     }
   }, [isOpen]);
@@ -228,7 +180,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleUpdateMemberStatus = async (id: string, newStatus: 'verified' | 'rejected' | 'pending') => {
     const updated = profiles.map((p) => (p.id === id ? { ...p, id06_status: newStatus } : p));
     setProfiles(updated);
-    localStorage.setItem('yrkeskortet_admin_members', JSON.stringify(updated));
 
     await updateProfileStatusInSupabase(id, newStatus);
 
@@ -239,67 +190,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTimeout(() => setMessage(null), 3000);
   };
 
-  // Create Test Application
-  const handleCreateTestApplication = () => {
-    const testNames = [
-      { name: 'Anton Söderberg', company: 'Söderbergs Måleri AB', id06: '9820 6632 1190', profession: 'Målare' },
-      { name: 'Linnéa Holmgren', company: 'Holmgren & Söner El AB', id06: '9840 3319 7721', profession: 'Elinstallatör' },
-      { name: 'Filip Nyström', company: 'Nordic Mark & Anläggning', id06: '9120 5544 3311', profession: 'Anläggare' },
-      { name: 'Rebecka Ek', company: 'Mälardalens Plåt & Tak AB', id06: '9820 9944 8833', profession: 'Plåtslagare' },
-    ];
+  // Filtered profiles for Tab 2
+  const filteredProfiles = profiles.filter((p) => {
+    if (memberFilter === 'all') return true;
+    return (p.id06_status || 'pending') === memberFilter;
+  });
 
-    const pick = testNames[Math.floor(Math.random() * testNames.length)];
-    const newTestProfile: Profile = {
-      id: 'test-' + Date.now(),
-      full_name: pick.name,
-      company_name: pick.company,
-      id06_number: pick.id06,
-      profession: pick.profession,
-      id06_status: 'pending',
-      created_at: new Date().toISOString(),
-    };
-
-    const nextProfiles = [newTestProfile, ...profiles];
-    setProfiles(nextProfiles);
-    localStorage.setItem('yrkeskortet_admin_members', JSON.stringify(nextProfiles));
-
-    setMessage({
-      type: 'success',
-      text: `Ny test-ansökan skapad för ${pick.name} (${pick.company}) med status "pending".`,
-    });
-    setTimeout(() => setMessage(null), 3500);
-  };
+  const pendingCount = profiles.filter((p) => (p.id06_status || 'pending') === 'pending').length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in text-[#0F172A]">
-      <div className="relative w-full max-w-lg bg-white sm:rounded-3xl shadow-2xl h-full sm:h-auto sm:max-h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 md:p-6 lg:p-8 bg-slate-950/75 backdrop-blur-md animate-fade-in text-[#0F172A]">
+      {/* REQUIREMENT 1: Full-width expanded dialog layout without max-w-lg mobile constraints */}
+      <div className="relative w-full max-w-7xl bg-white sm:rounded-3xl shadow-2xl h-full sm:h-[94vh] flex flex-col overflow-hidden border border-slate-100">
         {/* Top Gold Accent Bar */}
-        <div className="h-1.5 w-full bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500" />
+        <div className="h-1.5 w-full bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 shrink-0" />
 
         {/* Admin Header */}
-        <div className="p-4 bg-white border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow-md shadow-amber-400/20">
+        <div className="px-6 py-4 bg-white border-b border-slate-100 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow-md shadow-amber-400/20">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <h2 className="text-base font-black text-[#0F172A]">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-black text-[#0F172A]">
                   YRKESKORTET <span className="text-amber-500">ADMIN</span>
                 </h2>
-                <span className="text-[10px] font-extrabold uppercase bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">
+                <span className="text-[10px] font-extrabold uppercase bg-amber-50 text-amber-700 px-2.5 py-0.5 rounded-full border border-amber-200">
                   Portalkontroll
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
-                Direktkoppling mot Supabase `discounts` & `profiles`
+              <p className="text-xs text-slate-400">
+                Direktkoppling mot Supabase <code className="font-mono text-slate-600 bg-slate-100 px-1 py-0.2 rounded text-[11px]">discounts</code> & <code className="font-mono text-slate-600 bg-slate-100 px-1 py-0.2 rounded text-[11px]">profiles</code>
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:text-[#0F172A] hover:bg-slate-200 flex items-center justify-center transition-colors"
+            className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 hover:text-[#0F172A] hover:bg-slate-200 flex items-center justify-center transition-colors"
             aria-label="Stäng admin"
           >
             <X className="w-4 h-4" />
@@ -308,7 +237,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
         {/* Notification Toast */}
         {message && (
-          <div className="px-4 pt-3">
+          <div className="px-6 pt-3 shrink-0">
             <div
               className={`p-3 rounded-2xl border flex items-center gap-2 text-xs font-semibold ${
                 message.type === 'success'
@@ -327,11 +256,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         )}
 
         {/* Tab Navigation */}
-        <div className="px-4 pt-3">
-          <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl text-xs font-bold">
+        <div className="px-6 pt-4 shrink-0">
+          <div className="flex max-w-md gap-2 p-1 bg-slate-100 rounded-2xl text-xs font-bold">
             <button
               onClick={() => setActiveTab('discounts')}
-              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl transition-all ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl transition-all ${
                 activeTab === 'discounts'
                   ? 'bg-[#0F172A] text-white shadow-sm'
                   : 'text-slate-500 hover:text-[#0F172A]'
@@ -343,26 +272,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             <button
               onClick={() => setActiveTab('members')}
-              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl transition-all ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl transition-all ${
                 activeTab === 'members'
                   ? 'bg-[#0F172A] text-white shadow-sm'
                   : 'text-slate-500 hover:text-[#0F172A]'
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>Godkänn ID06 ({profiles.filter(p => p.id06_status === 'pending').length})</span>
+              <span>Medlemmar & ID06 ({profiles.length})</span>
+              {pendingCount > 0 && (
+                <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                  {pendingCount}
+                </span>
+              )}
             </button>
           </div>
         </div>
 
         {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* TAB 1: HANTERA RABATTER */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
+          {/* TAB 1: HANTERA RABATTER (WIDE 2-COLUMN DASHBOARD LAYOUT) */}
           {activeTab === 'discounts' && (
-            <div className="space-y-5">
-              {/* CREATE DISCOUNT FORM */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 shadow-sm space-y-3.5">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* LEFT COLUMN: CREATE DISCOUNT FORM */}
+              <div className="lg:col-span-5 xl:col-span-4 bg-slate-50 border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                   <div className="flex items-center gap-2">
                     <Plus className="w-4 h-4 text-amber-500" />
                     <h3 className="text-sm font-extrabold text-[#0F172A]">
@@ -374,7 +308,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </span>
                 </div>
 
-                <form onSubmit={handleCreateDiscount} className="space-y-3">
+                <form onSubmit={handleCreateDiscount} className="space-y-3.5">
                   {/* Company & Category */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -387,7 +321,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         value={company}
                         onChange={(e) => setCompany(e.target.value)}
                         placeholder="t.ex. Byggmax, Preem, Dagens Lunch..."
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium"
                       />
                     </div>
 
@@ -419,7 +353,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
                       placeholder="t.ex. 20% på alla Milwaukee-maskiner"
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium"
                     />
                   </div>
 
@@ -434,11 +368,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       placeholder="Villkor, giltighetstid och hur rabatten erhålls..."
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium"
                     />
                   </div>
 
-                  {/* Image URL Field (New Requirement) */}
+                  {/* Image URL Field */}
                   <div>
                     <label className="text-[11px] font-bold text-slate-600 block mb-1 flex items-center justify-between">
                       <span className="flex items-center gap-1">
@@ -454,7 +388,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       placeholder="https://images.unsplash.com/photo-..."
                       className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
                     />
-                    {/* Quick Image presets for convenience */}
+                    {/* Quick Image presets */}
                     <div className="flex gap-1.5 pt-1.5 overflow-x-auto no-scrollbar">
                       {[
                         { label: 'Mat/Lunch', url: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&q=80' },
@@ -548,23 +482,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </form>
               </div>
 
-              {/* EXISTING DISCOUNTS LIST */}
-              <div className="space-y-3">
+              {/* RIGHT COLUMN: EXISTING DISCOUNTS LIST */}
+              <div className="lg:col-span-7 xl:col-span-8 space-y-4">
                 <div className="flex items-center justify-between text-xs px-1">
-                  <h4 className="font-extrabold text-[#0F172A]">
-                    Befintliga rabatter ({discounts.length} st)
-                  </h4>
-                  <span className="text-slate-400 text-[11px]">Klicka på 🗑️ för att radera</span>
+                  <div>
+                    <h4 className="font-extrabold text-[#0F172A] text-sm">
+                      Befintliga rabatter ({discounts.length} st)
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Aktiva förmåner synliga i portalen
+                    </p>
+                  </div>
+                  <span className="text-slate-400 text-[11px] flex items-center gap-1">
+                    <Trash2 className="w-3.5 h-3.5 text-red-500" /> Klicka för att radera
+                  </span>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   {discounts.map((discount) => {
                     const thumbImg = discount.image_url || getCategoryFallbackImage(discount.category, discount.company);
 
                     return (
                       <div
                         key={discount.id}
-                        className="bg-white border border-slate-200/80 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-sm hover:shadow-md transition-shadow"
+                        className="bg-white border border-slate-200/80 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-sm hover:shadow-md transition-shadow"
                       >
                         {/* Thumbnail image */}
                         <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-100 shrink-0 relative">
@@ -618,112 +559,174 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           )}
 
-          {/* TAB 2: GODKÄNN ID06-MEDLEMMAR */}
+          {/* TAB 2: MEDLEMMAR & ID06 (ONLY REAL PROFILES FROM SUPABASE) */}
           {activeTab === 'members' && (
-            <div className="space-y-4">
-              {/* TEST APPLICATION ACTION */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-5 shadow-sm space-y-2">
-                <h3 className="text-sm font-extrabold text-[#0F172A] flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-amber-500" />
-                  Provkör medlemsgranskning
-                </h3>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Skapa en testansökan med status <strong className="text-amber-600">pending</strong> för att provköra godkännande och avslag.
-                </p>
+            <div className="space-y-5">
+              {/* Controls bar: Filters & Reload */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(['all', 'pending', 'verified', 'rejected'] as const).map((filter) => {
+                    const count = filter === 'all' 
+                      ? profiles.length 
+                      : profiles.filter(p => (p.id06_status || 'pending') === filter).length;
+                    const labels = {
+                      all: 'Alla medlemmar',
+                      pending: 'Väntar på beslut',
+                      verified: 'Verifierade',
+                      rejected: 'Nekade',
+                    };
+                    const isActive = memberFilter === filter;
+                    return (
+                      <button
+                        key={filter}
+                        type="button"
+                        onClick={() => setMemberFilter(filter)}
+                        className={`text-xs px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                          isActive
+                            ? 'bg-[#0F172A] text-white shadow-sm'
+                            : 'bg-white hover:bg-slate-200/70 text-slate-600 border border-slate-200/70'
+                        }`}
+                      >
+                        <span>{labels[filter]}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                          isActive ? 'bg-yellow-400 text-slate-950' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
 
-                <div className="pt-2 flex items-center gap-2">
-                  <button
-                    onClick={handleCreateTestApplication}
-                    className="flex-1 flex items-center justify-center gap-1.5 bg-[#0F172A] hover:bg-slate-800 text-white font-extrabold py-2.5 px-3 rounded-2xl text-xs transition-colors shadow-sm"
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[3] text-yellow-400" />
-                    <span>Skapa test-ansökan</span>
-                  </button>
-
+                <div className="flex items-center gap-2 self-end sm:self-auto">
                   <button
                     onClick={loadProfiles}
-                    className="p-2.5 bg-white hover:bg-slate-100 text-slate-600 rounded-2xl border border-slate-200 transition-colors shadow-sm"
+                    disabled={loadingProfiles}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 transition-colors shadow-sm active:scale-95"
                     title="Ladda om från Supabase"
                   >
-                    <RefreshCw className={`w-4 h-4 ${loadingProfiles ? 'animate-spin text-amber-500' : ''}`} />
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingProfiles ? 'animate-spin text-amber-500' : 'text-slate-500'}`} />
+                    <span>{loadingProfiles ? 'Laddar...' : 'Uppdatera'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* MEMBERS LIST */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs px-1">
-                  <h4 className="font-extrabold text-[#0F172A]">
-                    ID06-ansökningar ({profiles.length})
-                  </h4>
-                  <span className="text-slate-400 text-[11px]">
-                    {profiles.filter(p => p.id06_status === 'pending').length} väntar på beslut
-                  </span>
+              {/* Loading State */}
+              {loadingProfiles && (
+                <div className="py-16 text-center space-y-2">
+                  <RefreshCw className="w-7 h-7 animate-spin text-amber-500 mx-auto" />
+                  <p className="text-xs text-slate-500 font-medium">
+                    Hämtar registrerade medlemmar från Supabase...
+                  </p>
                 </div>
+              )}
 
-                <div className="space-y-3">
-                  {profiles.map((member) => {
+              {/* REQUIREMENT 2: EMPTY STATE - EXACT TEXT: "Inga registrerade medlemmar hittades i databasen" */}
+              {!loadingProfiles && filteredProfiles.length === 0 && (
+                <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-12 text-center space-y-3 my-4">
+                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 text-slate-400 flex items-center justify-center mx-auto shadow-sm">
+                    <Users className="w-8 h-8 text-slate-400" />
+                  </div>
+                  <h4 className="text-base sm:text-lg font-black text-[#0F172A]">
+                    Inga registrerade medlemmar hittades i databasen
+                  </h4>
+                  <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+                    När hantverkare scannar sitt ID06 och sparar sitt medlemskap i appen dyker de upp här direkt.
+                  </p>
+                  <div className="pt-2">
+                    <button
+                      onClick={loadProfiles}
+                      disabled={loadingProfiles}
+                      className="inline-flex items-center gap-2 bg-white hover:bg-slate-100 text-[#0F172A] border border-slate-200 font-bold px-4 py-2.5 rounded-xl text-xs shadow-sm transition-all active:scale-95"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingProfiles ? 'animate-spin text-amber-500' : 'text-slate-600'}`} />
+                      <span>Ladda om från Supabase</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* MEMBERS GRID (ONLY REAL PROFILES FROM SUPABASE) */}
+              {!loadingProfiles && filteredProfiles.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredProfiles.map((member) => {
                     const status = member.id06_status || 'pending';
 
                     return (
                       <div
                         key={member.id}
-                        className="bg-white border border-slate-200/80 rounded-3xl p-4 shadow-sm space-y-3"
+                        className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-sm space-y-3.5 flex flex-col justify-between hover:shadow-md transition-shadow"
                       >
-                        {/* Member Header */}
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h5 className="font-extrabold text-[#0F172A] text-sm">
-                                {member.full_name || 'Namnlös medlem'}
-                              </h5>
-                              {member.profession && (
-                                <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-bold">
-                                  {member.profession}
-                                </span>
-                              )}
+                        <div className="space-y-3">
+                          {/* Member Header */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h5 className="font-extrabold text-[#0F172A] text-sm">
+                                  {member.full_name || 'Namnlös medlem'}
+                                </h5>
+                                {member.profession && (
+                                  <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.2 rounded-md font-bold">
+                                    {member.profession}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-500 flex items-center gap-1">
+                                <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span>{member.company_name || 'Inget företag angivet'}</span>
+                              </p>
                             </div>
 
-                            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
-                              <Building2 className="w-3 h-3 text-slate-400" />
-                              {member.company_name || 'Inget företag angivet'}
-                            </p>
+                            {/* Status Badge */}
+                            {status === 'verified' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full shrink-0">
+                                <CheckCircle className="w-3 h-3" />
+                                Verifierad
+                              </span>
+                            ) : status === 'rejected' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded-full shrink-0">
+                                <XCircle className="w-3 h-3" />
+                                Nekad
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-0.5 rounded-full shrink-0 animate-pulse">
+                                <Clock className="w-3 h-3" />
+                                Väntar
+                              </span>
+                            )}
                           </div>
 
-                          {/* Status Badge */}
-                          {status === 'verified' ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                              <CheckCircle className="w-3.5 h-3.5" />
-                              Verifierad ID06
+                          {/* ID06 number box */}
+                          <div className="bg-slate-50 rounded-2xl p-2.5 flex items-center justify-between text-xs border border-slate-100">
+                            <span className="text-slate-500 flex items-center gap-1">
+                              <CreditCard className="w-3.5 h-3.5 text-amber-500" />
+                              ID06:
                             </span>
-                          ) : status === 'rejected' ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded-full">
-                              <XCircle className="w-3.5 h-3.5" />
-                              Nekad
+                            <span className="font-mono font-bold text-[#0F172A] tracking-wider">
+                              {member.id06_number || 'Saknar ID06'}
                             </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-0.5 rounded-full animate-pulse">
-                              <Clock className="w-3.5 h-3.5" />
-                              Väntar på ID06
-                            </span>
+                          </div>
+
+                          {member.created_at && (
+                            <div className="text-[10px] text-slate-400 flex items-center justify-between px-1">
+                              <span>Registrerad:</span>
+                              <span className="font-medium text-slate-500">
+                                {new Date(member.created_at).toLocaleDateString('sv-SE', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </span>
+                            </div>
                           )}
                         </div>
 
-                        {/* ID06 number box */}
-                        <div className="bg-slate-50 rounded-2xl p-2.5 flex items-center justify-between text-xs border border-slate-100">
-                          <span className="text-slate-500 flex items-center gap-1">
-                            <CreditCard className="w-3.5 h-3.5 text-amber-500" />
-                            ID06:
-                          </span>
-                          <span className="font-mono font-bold text-[#0F172A] tracking-wider">
-                            {member.id06_number || 'Saknar ID06'}
-                          </span>
-                        </div>
-
                         {/* Action Decision Buttons */}
-                        <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
+                        <div className="pt-2 border-t border-slate-100">
                           {status === 'pending' ? (
-                            <>
+                            <div className="flex items-center gap-2">
                               <button
                                 onClick={() => handleUpdateMemberStatus(member.id, 'verified')}
                                 className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-2 px-3 rounded-xl text-xs transition-all shadow-sm active:scale-95"
@@ -739,17 +742,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 <XCircle className="w-3.5 h-3.5" />
                                 <span>Neka</span>
                               </button>
-                            </>
+                            </div>
                           ) : (
                             <div className="w-full flex items-center justify-between">
                               <span className="text-[11px] text-slate-400">
-                                Beslut fattat. Ändra status?
+                                Ändra status:
                               </span>
                               <div className="flex gap-1.5">
                                 {status !== 'verified' && (
                                   <button
                                     onClick={() => handleUpdateMemberStatus(member.id, 'verified')}
-                                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold border border-emerald-200"
+                                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold border border-emerald-200 transition-colors"
                                   >
                                     Godkänn
                                   </button>
@@ -757,14 +760,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 {status !== 'rejected' && (
                                   <button
                                     onClick={() => handleUpdateMemberStatus(member.id, 'rejected')}
-                                    className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-[10px] font-bold border border-red-200"
+                                    className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-[10px] font-bold border border-red-200 transition-colors"
                                   >
                                     Neka
                                   </button>
                                 )}
                                 <button
                                   onClick={() => handleUpdateMemberStatus(member.id, 'pending')}
-                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-medium"
+                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-medium transition-colors"
                                 >
                                   Återställ
                                 </button>
@@ -776,17 +779,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     );
                   })}
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Footer info */}
-        <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-          <span>Inloggad som portaladministratör</span>
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 shrink-0">
+          <span className="flex items-center gap-1.5 font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+            Inloggad som portaladministratör
+          </span>
           <button
             onClick={onClose}
-            className="flex items-center gap-1 text-amber-600 font-extrabold hover:underline"
+            className="flex items-center gap-1 text-slate-700 hover:text-slate-950 font-bold hover:underline transition-colors"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Stäng admin</span>
