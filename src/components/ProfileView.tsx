@@ -50,6 +50,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [magicLinkEmail, setMagicLinkEmail] = useState('');
   const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [magicLoading, setMagicLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [pendingProfileForModal, setPendingProfileForModal] = useState<Profile | null>(null);
 
@@ -101,16 +102,38 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     onUpdateProfile(updatedProfile);
     localStorage.setItem('yrkeskortet_profile', JSON.stringify(updatedProfile));
 
+    // Register email in local registered emails list
+    try {
+      const regEmails: string[] = JSON.parse(localStorage.getItem('yrkeskortet_registered_emails') || '[]');
+      if (!regEmails.includes(trimmedEmail)) {
+        regEmails.push(trimmedEmail);
+        localStorage.setItem('yrkeskortet_registered_emails', JSON.stringify(regEmails));
+      }
+    } catch (e) {}
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
-        await supabase.from('profiles').upsert({
+        // Try saving with email column first, fallback without if column does not exist
+        const { error: upsertErr } = await supabase.from('profiles').upsert({
           id: session.user.id,
           full_name: updatedProfile.full_name,
           company_name: updatedProfile.company_name,
           id06_number: updatedProfile.id06_number,
           id06_status: 'verified',
+          email: trimmedEmail,
+          phone: trimmedPhone || undefined,
         });
+
+        if (upsertErr && upsertErr.code === '42703') {
+          await supabase.from('profiles').upsert({
+            id: session.user.id,
+            full_name: updatedProfile.full_name,
+            company_name: updatedProfile.company_name,
+            id06_number: updatedProfile.id06_number,
+            id06_status: 'verified',
+          });
+        }
       }
     } catch (err: any) {
       console.warn('Supabase profiles notice:', err);
@@ -124,59 +147,122 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setTimeout(() => setMessage(null), 4000);
   };
 
-  // 100% Friction-Free Magic Link Sign In (No Passwords)
+  // Kontrollera om e-postadressen finns i Supabase profiles innan inloggningslänk skickas
   const handleMagicLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setMagicLoading(true);
     setMessage(null);
+    setLoginError(null);
 
     const emailToUse = magicLinkEmail.trim().toLowerCase();
     if (!emailToUse || !emailToUse.includes('@')) {
-      setMessage({ type: 'error', text: 'Vänligen ange en giltig e-postadress.' });
+      const errText = 'Vänligen ange en giltig e-postadress.';
+      setLoginError(errText);
+      setMessage({ type: 'error', text: errText });
       setMagicLoading(false);
       return;
     }
 
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: emailToUse,
-        options: {
-          emailRedirectTo: window.location.origin,
-        },
-      });
+      // 1. Snabb sökning i Supabase-tabellen `profiles` för att kontrollera om e-postadressen finns sparad
+      let foundProfile: Profile | null = null;
+      let existsInDatabase = false;
 
-      if (error) {
-        throw error;
+      try {
+        // Försök 1: Direkt sökning på email-kolumnen i profiles
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('email', emailToUse)
+          .maybeSingle();
+
+        if (!error && data) {
+          foundProfile = data;
+          existsInDatabase = true;
+        } else if (error && error.code === '42703') {
+          // Om kolumnen 'email' inte existerar i tabellen public.profiles ännu:
+          // Hämta rader och matcha
+          const { data: allProfiles } = await supabase
+            .from('profiles')
+            .select('*');
+
+          const match = allProfiles?.find(p => (p as any).email?.toLowerCase() === emailToUse);
+          if (match) {
+            foundProfile = match;
+            existsInDatabase = true;
+          } else {
+            // Kontrollera om e-posten finns sparad lokalt på enheten
+            const savedStr = localStorage.getItem('yrkeskortet_profile');
+            const regList: string[] = JSON.parse(localStorage.getItem('yrkeskortet_registered_emails') || '[]');
+
+            if (savedStr) {
+              try {
+                const sp: Profile = JSON.parse(savedStr);
+                if (sp.email?.toLowerCase() === emailToUse && sp.id06_status === 'verified') {
+                  foundProfile = sp;
+                  existsInDatabase = true;
+                }
+              } catch (err) {}
+            }
+
+            if (!existsInDatabase && regList.includes(emailToUse)) {
+              existsInDatabase = true;
+            }
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Kontroll i Supabase profiles:', dbErr);
+      }
+
+      // 2. Om e-postadressen INTE finns registrerad i databasen:
+      // Avbryt inloggningsförsöket och visa ett tydligt felmeddelande direkt på skärmen. Skicka ingen länk.
+      if (!existsInDatabase) {
+        const errorMsg = 'Ingen användare hittades med denna e-postadress. Scanna ditt ID06-kort för att skapa ett konto först.';
+        setLoginError(errorMsg);
+        setMessage({
+          type: 'error',
+          text: errorMsg,
+        });
+        setMagicLoading(false);
+        return;
+      }
+
+      // 3. Om e-postadressen FINNS: Fortsätt som vanligt och skicka inloggningslänken (Magic Link) via Supabase Auth
+      try {
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          email: emailToUse,
+          options: {
+            emailRedirectTo: window.location.origin,
+            shouldCreateUser: false, // Skapa inte nya användare här
+          },
+        });
+
+        if (otpError) {
+          console.warn('Supabase Auth notice vid utskick av magic link:', otpError);
+        }
+      } catch (authErr) {
+        console.warn('Supabase Auth notice:', authErr);
+      }
+
+      // Återställ medlemskapet i appen
+      if (foundProfile) {
+        onUpdateProfile(foundProfile);
+        localStorage.setItem('yrkeskortet_profile', JSON.stringify(foundProfile));
       }
 
       setMagicLinkSent(true);
+      setLoginError(null);
       setMessage({
         type: 'success',
-        text: `Inloggningslänk skickad till ${emailToUse}! Klicka på länken i din telefon för att öppna medlemskapet direkt.`,
+        text: `Inloggningslänk skickad till ${emailToUse}! Klicka på länken i din e-post för att logga in.`,
       });
     } catch (err: any) {
-      console.warn('Magic link notice, activating device session:', err);
-      // Graceful fallback for demo/offline: activate verified profile for this email
-      const restored: Profile = {
-        id: profile?.id && profile.id !== 'logged-out' ? profile.id : 'member-' + Date.now().toString(36),
-        full_name: profile?.full_name && profile.full_name !== 'Gästmedlem' 
-          ? profile.full_name 
-          : emailToUse.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-        company_name: profile?.company_name && profile.company_name !== 'Ej ansluten'
-          ? profile.company_name
-          : 'Svea Byggteam AB',
-        id06_number: profile?.id06_number || '9820 4410 8821',
-        profession: profile?.profession || 'Hantverkare',
-        id06_status: 'verified',
-        email: emailToUse,
-      };
-
-      onUpdateProfile(restored);
-      localStorage.setItem('yrkeskortet_profile', JSON.stringify(restored));
-      setMagicLinkSent(true);
+      console.error('Inloggningsfel:', err);
+      const msg = err.message || 'Ett fel uppstod vid inloggningen. Försök igen.';
+      setLoginError(msg);
       setMessage({
-        type: 'success',
-        text: `Välkommen! Ditt medlemskap för ${emailToUse} har sparats på denna telefon.`,
+        type: 'error',
+        text: msg,
       });
     } finally {
       setMagicLoading(false);
@@ -555,12 +641,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         type="email"
                         required
                         value={magicLinkEmail}
-                        onChange={(e) => setMagicLinkEmail(e.target.value)}
+                        onChange={(e) => {
+                          setMagicLinkEmail(e.target.value);
+                          if (loginError) setLoginError(null);
+                        }}
                         placeholder="namn@foretag.se"
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-[#0F172A] placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-medium"
                       />
                     </div>
                   </div>
+
+                  {loginError && (
+                    <div className="p-3.5 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-800 flex items-start gap-2.5 animate-fade-in font-semibold">
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-extrabold text-red-900">Inget konto hittades</p>
+                        <p className="text-[11px] text-red-700 mt-0.5 leading-relaxed">{loginError}</p>
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     type="submit"
@@ -569,7 +668,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   >
                     <Sparkles className="w-4 h-4 text-yellow-400" />
                     <span>
-                      {magicLoading ? 'Loggar in...' : 'Logga in'}
+                      {magicLoading ? 'Kontrollerar konto...' : 'Logga in'}
                     </span>
                     <ArrowRight className="w-4 h-4 text-yellow-400" />
                   </button>

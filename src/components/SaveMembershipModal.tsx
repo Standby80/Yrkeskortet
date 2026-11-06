@@ -70,6 +70,15 @@ export const SaveMembershipModal: React.FC<SaveMembershipModalProps> = ({
         localStorage.setItem('yrkeskortet_remember_me', 'true');
       }
 
+      // Register email into registered users list
+      try {
+        const regEmails: string[] = JSON.parse(localStorage.getItem('yrkeskortet_registered_emails') || '[]');
+        if (!regEmails.includes(trimmedEmail)) {
+          regEmails.push(trimmedEmail);
+          localStorage.setItem('yrkeskortet_registered_emails', JSON.stringify(regEmails));
+        }
+      } catch (e) {}
+
       // 2. Create account in Supabase Auth (Requirement 2: spara på riktigt i molnet)
       try {
         const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
@@ -93,13 +102,25 @@ export const SaveMembershipModal: React.FC<SaveMembershipModalProps> = ({
 
         // If active session was created, upsert to Supabase profiles table
         if (signUpData?.session?.user) {
-          await supabase.from('profiles').upsert({
+          const { error: pErr } = await supabase.from('profiles').upsert({
             id: signUpData.session.user.id,
             full_name: updatedProfile.full_name,
             company_name: updatedProfile.company_name,
             id06_number: updatedProfile.id06_number,
             id06_status: 'verified',
+            email: trimmedEmail,
+            phone: trimmedPhone || undefined,
           });
+
+          if (pErr && pErr.code === '42703') {
+            await supabase.from('profiles').upsert({
+              id: signUpData.session.user.id,
+              full_name: updatedProfile.full_name,
+              company_name: updatedProfile.company_name,
+              id06_number: updatedProfile.id06_number,
+              id06_status: 'verified',
+            });
+          }
         } else if (signUpErr) {
           // If already registered or OTP preferred, trigger signInWithOtp
           console.info('Supabase signUp note:', signUpErr.message);
@@ -126,13 +147,25 @@ export const SaveMembershipModal: React.FC<SaveMembershipModalProps> = ({
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           updatedProfile.id = session.user.id;
-          await supabase.from('profiles').upsert({
+          const { error: dbErr } = await supabase.from('profiles').upsert({
             id: session.user.id,
             full_name: updatedProfile.full_name,
             company_name: updatedProfile.company_name,
             id06_number: updatedProfile.id06_number,
             id06_status: 'verified',
+            email: trimmedEmail,
+            phone: trimmedPhone || undefined,
           });
+
+          if (dbErr && dbErr.code === '42703') {
+            await supabase.from('profiles').upsert({
+              id: session.user.id,
+              full_name: updatedProfile.full_name,
+              company_name: updatedProfile.company_name,
+              id06_number: updatedProfile.id06_number,
+              id06_status: 'verified',
+            });
+          }
         }
       } catch (dbErr) {
         console.warn('Could not upsert to Supabase table:', dbErr);
