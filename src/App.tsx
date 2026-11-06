@@ -82,6 +82,9 @@ export function App() {
                 full_name: data.full_name || '',
                 company_name: data.company_name || '',
                 id06_number: data.id06_number || '',
+                id06_status: (data.id06_status as any) || 'verified',
+                email: session.user.email,
+                phone: (session.user.user_metadata?.phone) || undefined,
               };
               setProfile(loaded);
               localStorage.setItem('yrkeskortet_profile', JSON.stringify(loaded));

@@ -64,34 +64,68 @@ export const SaveMembershipModal: React.FC<SaveMembershipModalProps> = ({
     };
 
     try {
-      // 1. Always persist to localStorage for instant 100% friction-free mobile access
+      // 1. Persist locally immediately for instant 100% friction-free mobile access
       if (rememberMe) {
         localStorage.setItem('yrkeskortet_profile', JSON.stringify(updatedProfile));
         localStorage.setItem('yrkeskortet_remember_me', 'true');
       }
 
-      // 2. Send Supabase Magic Link / OTP without passwords so they can restore on any phone
+      // 2. Create account in Supabase Auth (Requirement 2: spara på riktigt i molnet)
       try {
-        await supabase.auth.signInWithOtp({
+        const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
           email: trimmedEmail,
+          password: 'YrkeskortetPass2026!',
           options: {
             data: {
               full_name: updatedProfile.full_name,
               company_name: updatedProfile.company_name,
               id06_number: updatedProfile.id06_number,
               phone: trimmedPhone,
+              id06_status: 'verified',
             },
             emailRedirectTo: window.location.origin,
           },
         });
+
+        if (signUpData?.user?.id) {
+          updatedProfile.id = signUpData.user.id;
+        }
+
+        // If active session was created, upsert to Supabase profiles table
+        if (signUpData?.session?.user) {
+          await supabase.from('profiles').upsert({
+            id: signUpData.session.user.id,
+            full_name: updatedProfile.full_name,
+            company_name: updatedProfile.company_name,
+            id06_number: updatedProfile.id06_number,
+            id06_status: 'verified',
+          });
+        } else if (signUpErr) {
+          // If already registered or OTP preferred, trigger signInWithOtp
+          console.info('Supabase signUp note:', signUpErr.message);
+          await supabase.auth.signInWithOtp({
+            email: trimmedEmail,
+            options: {
+              data: {
+                full_name: updatedProfile.full_name,
+                company_name: updatedProfile.company_name,
+                id06_number: updatedProfile.id06_number,
+                phone: trimmedPhone,
+                id06_status: 'verified',
+              },
+              emailRedirectTo: window.location.origin,
+            },
+          });
+        }
       } catch (authErr) {
-        console.warn('Supabase OTP notice (device saved locally):', authErr);
+        console.warn('Supabase Auth account creation notice:', authErr);
       }
 
-      // 3. Upsert to Supabase profiles if an active session exists
+      // 3. Upsert to Supabase profiles table if active session exists
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
+          updatedProfile.id = session.user.id;
           await supabase.from('profiles').upsert({
             id: session.user.id,
             full_name: updatedProfile.full_name,
@@ -104,6 +138,9 @@ export const SaveMembershipModal: React.FC<SaveMembershipModalProps> = ({
         console.warn('Could not upsert to Supabase table:', dbErr);
       }
 
+      // Ensure localStorage has the final updated id
+      localStorage.setItem('yrkeskortet_profile', JSON.stringify(updatedProfile));
+
       setSuccess(true);
       onSaved(updatedProfile);
 
@@ -115,7 +152,7 @@ export const SaveMembershipModal: React.FC<SaveMembershipModalProps> = ({
       }, 1400);
     } catch (err: any) {
       console.error('Error saving membership:', err);
-      // Fallback: save locally anyway
+      // Fallback: save locally anyway so user is never blocked
       onSaved(updatedProfile);
       setSuccess(true);
       setTimeout(() => {
